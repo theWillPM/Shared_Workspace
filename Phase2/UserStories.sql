@@ -1,3 +1,10 @@
+/*
+@Author: Willian P. Munhoz, Rafael M. Conceição. 
+@Course: DATA1201 - Introduction to relational databases
+@Instructor: Mohamed Elmenshawy
+@Date: April 18th, 2023
+*/
+
 --1.
 /* As a user, I can sign up for an account and provide my information
 (name, phone, and email). I can give my role as an owner or a
