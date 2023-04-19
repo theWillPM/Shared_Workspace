@@ -55,17 +55,19 @@ GO
 IF OBJECT_ID('CheckIfOwnsWorkspaceProperty') IS NOT NULL
 DROP function CheckIfOwnsWorkspaceProperty
 GO
-CREATE function CheckIfOwnsWorkspaceProperty(@AccountNumber int, @WorkspaceID INT)
+CREATE function CheckIfOwnsWorkspaceProperty(@AccountNumber int, @WorkspaceID INT NULL)
 RETURNS BIT
 	AS BEGIN
-		RETURN (SELECT CASE WHEN EXISTS
-		(SELECT w.Workspace_ID, po.Property_ID, po.Account_Number
-		FROM Property_Owner po, Workspace w
-		WHERE w.Property_ID = po.Property_ID
-		GROUP BY po.Account_Number, w.Workspace_ID, po.Property_ID
-		HAVING Workspace_ID = @WorkspaceID and Account_Number = @AccountNumber)
-		THEN CAST(1 as bit)
-		ELSE CAST(0 as bit)
+		RETURN (SELECT CASE
+			WHEN @WorkspaceID IS NULL THEN CAST(1 as bit)
+			WHEN EXISTS
+				(SELECT w.Workspace_ID, po.Property_ID, po.Account_Number
+				FROM Property_Owner po, Workspace w
+				WHERE w.Property_ID = po.Property_ID
+				GROUP BY po.Account_Number, w.Workspace_ID, po.Property_ID
+				HAVING Workspace_ID = @WorkspaceID and Account_Number = @AccountNumber)
+			THEN CAST(1 as bit)
+			ELSE CAST(0 as bit)
 		END)
 	END
 GO
@@ -75,173 +77,139 @@ GO
 IF OBJECT_ID('CheckIfOwnsProperty') IS NOT NULL
 DROP function CheckIfOwnsProperty
 GO
-CREATE function CheckIfOwnsProperty(@AccountNumber int, @PropertyID INT)
+CREATE function CheckIfOwnsProperty(@AccountNumber int, @PropertyID INT NULL)
 RETURNS BIT
 	AS BEGIN
-		RETURN (SELECT CASE WHEN EXISTS
-		(SELECT po.Property_ID, po.Account_Number
-		FROM Property_Owner po
-		WHERE Property_ID = @PropertyID and Account_Number = @AccountNumber)
-		THEN CAST(1 as bit)
-		ELSE CAST(0 as bit)
+		RETURN (SELECT CASE 
+			WHEN @PropertyID IS NULL THEN CAST(1 as bit)
+			WHEN EXISTS
+				(SELECT po.Property_ID, po.Account_Number
+				FROM Property_Owner po
+				WHERE Property_ID = @PropertyID and Account_Number = @AccountNumber)
+			THEN CAST(1 as bit)
+			ELSE CAST(0 as bit)
 		END)
+
 	END
 GO
 
 -- Create Tables in Database.
 -- USER
 CREATE TABLE [User] (
-  Email varchar(255) UNIQUE NOT NULL,
-  First_Name varchar(50) NOT NULL,
-  Last_Name varchar(50) NOT NULL,
-  Phone varchar(50),
-  Registration_Date smalldatetime NOT NULL,
-  PRIMARY KEY (Email)
+  Email							varchar(255)	PRIMARY KEY,
+  First_Name					varchar(50)		NOT NULL,
+  Last_Name						varchar(50)		NOT NULL,
+  Phone							varchar(50),
+  Registration_Date				smalldatetime	NOT NULL
 );
 GO
 
 -- ACCOUNT. Uses Email as FK.
 CREATE TABLE Account (
-  Account_Number int UNIQUE NOT NULL IDENTITY(1,1),
-  Account_Type char(10) NOT NULL,
-  CONSTRAINT [ac.check_type] CHECK (Account_Type IN ('Coworker', 'Owner')),
-  Email varchar(255) UNIQUE NOT NULL,
-  Is_Active bit DEFAULT 1 NOT NULL,
-  [Password] varchar(255) NOT NULL,
-  PRIMARY KEY (Account_Number),
-  CONSTRAINT [FK_Account.Email]
-  FOREIGN KEY (Email)
-  REFERENCES [User](Email)
+  Account_Number				int				PRIMARY KEY IDENTITY(1,1),
+  Account_Type					char(10)		NOT NULL,
+  Email							varchar(255)	FOREIGN KEY REFERENCES [User](Email),
+  Is_Active						bit				DEFAULT 1 NOT NULL,
+  [Password]					varchar(255)	NOT NULL,
+
+  CONSTRAINT [ac.check_type] CHECK (Account_Type IN ('Coworker', 'Owner'))  
 );
 Go
 
 -- PROPERTY. NO FK.
 CREATE TABLE Property (
-  Property_ID int UNIQUE NOT NULL IDENTITY(1,1) ,
-  [Address] varchar(50) NOT NULL,
-  Neighborhood varchar(50) NOT NULL,
-  Square_Feet int,
-  Has_Parking_Garage bit NOT NULL,
+  Property_ID					int				PRIMARY KEY IDENTITY(1,1) ,
+  [Address]						varchar(50)		NOT NULL,
+  Neighborhood					varchar(50),			
+  Square_Feet					int,
+  Has_Parking_Garage			bit NOT NULL,
   Is_Reachable_By_Public_Transp bit NOT NULL,
-  PRIMARY KEY (Property_ID)
 );
 GO
 
 -- PROPERTY_OWNER. Associative entity. Uses Account_Number and Property_ID as FK.  Checks if the Account_Number is 'Owner'.
 CREATE TABLE Property_Owner (
-  Account_Number int NOT NULL,
-  Property_ID int NOT NULL,
-  CONSTRAINT [po.check_if_is_owner] CHECK (dbo.CheckIfIsOwner(Account_Number) = 1),
+  Account_Number				int NOT NULL	FOREIGN KEY REFERENCES Account(Account_Number),
+  Property_ID					int				FOREIGN KEY REFERENCES Property(Property_ID) ON DELETE CASCADE,
   PRIMARY KEY (Account_Number, Property_ID),
-  CONSTRAINT [FK_Property_Owner.Account_Number]
-  FOREIGN KEY (Account_Number)
-  REFERENCES Account(Account_Number),
-  CONSTRAINT [FK_Property_Owner.Property_ID]
-  FOREIGN KEY (Property_ID)
-  REFERENCES Property(Property_ID)
-  ON DELETE CASCADE
+
+  -- constraint that checks if the account is in fact of the 'owner' type
+  CONSTRAINT [po.check_if_is_owner] CHECK (dbo.CheckIfIsOwner(Account_Number) = 1)
 );
 GO
 
 -- WORKSPACE. Uses Property_ID as FK.
 CREATE TABLE Workspace (
-  Workspace_ID int UNIQUE NOT NULL IDENTITY(1,1),
-  Property_ID int NOT NULL,
-  Seats int NOT NULL,
-  Is_Smoking_Allowed bit NOT NULL,
-  [Type] varchar(30) NOT NULL,
-  CONSTRAINT [ws.check_type] CHECK ([Type] in ('Meeting Room', 'Private Office Room', 'Desk')),
-  PRIMARY KEY (Workspace_ID),
-  CONSTRAINT [FK_Workspace.Property_ID]
-  FOREIGN KEY (Property_ID)
-  REFERENCES Property(Property_ID)
-  ON DELETE CASCADE
+  Workspace_ID					int				PRIMARY KEY	IDENTITY(1,1),
+  Property_ID					int				NOT NULL FOREIGN KEY REFERENCES Property(Property_ID) ON DELETE CASCADE,
+  Seats							int				NOT NULL,
+  Is_Smoking_Allowed			bit				NOT NULL,
+  [Type]						varchar(30)		NOT NULL,
+
+  --constraint to check if the entered type is accepted: 
+  CONSTRAINT [ws.check_type] CHECK ([Type] in ('Meeting Room', 'Private Office Room', 'Desk'))
 );
 GO
 
 
 -- LISTING. Uses Account_Number and Workspace_ID as FK. Checks if the Account_Number owns the property in question.
 CREATE TABLE Listing (
-  Listing_ID int UNIQUE NOT NULL IDENTITY (1,1),
-  Account_Number int NOT NULL,
-  Workspace_ID int NOT NULL,
-  Lease_Term varchar(50) NOT NULL,
-  Availability_Date varchar(50) NOT NULL,
-  Price smallmoney NOT NULL,
-  CONSTRAINT [li.check_if_owns_property] CHECK (dbo.CheckIfOwnsWorkspaceProperty(Account_Number, Workspace_ID) = 1),
-  PRIMARY KEY (Listing_ID),
-  CONSTRAINT [FK_Listing.Workspace_ID]
-  FOREIGN KEY (Workspace_ID)
-  REFERENCES Workspace(Workspace_ID)
-  ON DELETE CASCADE,
-  CONSTRAINT [FK_Listing.Account_Number]
-  FOREIGN KEY (Account_Number)
-  REFERENCES Account(Account_Number)
+  Listing_ID					int				PRIMARY KEY IDENTITY (1,1),
+  Account_Number				int				NOT NULL FOREIGN KEY REFERENCES Account(Account_Number),
+  Workspace_ID					int				FOREIGN KEY REFERENCES Workspace(Workspace_ID) ON DELETE CASCADE,
+  Lease_Term					varchar(50)		NOT NULL,
+  Availability_Date				varchar(50)		NOT NULL,
+  Price							smallmoney		NOT NULL,
+
+  --constraint to check if the account is listed as an owner of the property where the workspace is.
+  CONSTRAINT [li.check_if_owns_property] CHECK (dbo.CheckIfOwnsWorkspaceProperty(Account_Number, Workspace_ID) = 1),  
 );
 GO
 
 -- BOOKING. Uses Account_Number and Listing_ID as FK.
 CREATE TABLE Booking (
-  Booking_ID int UNIQUE NOT NULL IDENTITY(1,1),
-  Listing_ID int NOT NULL,
-  Account_Number int NOT NULL,
-  Payment_ID int NULL,
-  Order_Date smalldatetime NOT NULL,
-  Lease_Term_Quantity int NOT NULL,
-  CONSTRAINT [bk.check_if_account_is_active] CHECK (dbo.CheckIfAccountIsActive(Account_Number) = 1),
-  PRIMARY KEY (Booking_ID),
-  CONSTRAINT [FK_Booking.Account_Number]
-  FOREIGN KEY (Account_Number)
-  REFERENCES Account(Account_Number),
-  CONSTRAINT [FK_Booking.Listing_ID]
-  FOREIGN KEY (Listing_ID)
-  REFERENCES Listing(Listing_ID)
-  ON DELETE CASCADE
+  Booking_ID					int				PRIMARY KEY IDENTITY(1,1),
+  Listing_ID					int				NOT NULL FOREIGN KEY REFERENCES Listing(Listing_ID),
+  Account_Number				int				NOT NULL FOREIGN KEY REFERENCES Account(Account_Number),
+  Payment_ID					int				NULL,
+  Order_Date					smalldatetime	NOT NULL,
+  Lease_Term_Quantity			int				NOT NULL,
+
+  --constraint to check if the account that is trying to perform a booking is active in the system
+  CONSTRAINT [bk.check_if_account_is_active] CHECK (dbo.CheckIfAccountIsActive(Account_Number) = 1)
 );
 GO
 
--- TRANSACTION. Uses Email as FK.
+-- TRANSACTION. Uses Email and Payment_ID as FK.
 CREATE TABLE [Transaction] (
-  Transaction_ID varchar(50) UNIQUE NOT NULL,
-  Payment_ID int NOT NULL,
-  Transaction_Amount smallmoney NOT NULL,
-  Transaction_Type varchar(50),
-  Transaction_Date smalldatetime NOT NULL,
-  Email varchar(255) NOT NULL,
+  Transaction_ID				varchar(50)		PRIMARY KEY,
+  Payment_ID					int				NOT NULL, -- this FK will be added after we create the table [Payment]
+  Transaction_Amount			smallmoney		NOT NULL,
+  Transaction_Type				varchar(50),
+  Transaction_Date				smalldatetime	NOT NULL,
+  Email							varchar(255)	NOT NULL FOREIGN KEY REFERENCES [User](Email),
+
+  --constraint to check if the transaction type is one of the following:
   CONSTRAINT [tr.check_type] CHECK (Transaction_Type IN ('Cash', 'Credit', 'Debit', 'Bank transfer', 'Interac', 'Cheque')),
-  PRIMARY KEY (Transaction_ID),
-  CONSTRAINT [FK_Transaction.Email]
-  FOREIGN KEY (Email)
-  REFERENCES [User](Email),
 );
 GO
 
 -- PAYMENT. Uses Booking_ID as FK.
 CREATE TABLE Payment (
-  Payment_ID int UNIQUE NOT NULL IDENTITY(1001,1),
-  Amount_Due smallmoney NOT NULL,
-  Booking_ID int NOT NULL,
-  PRIMARY KEY (Payment_ID),
-  CONSTRAINT [FK_Payment.Booking_ID]
-  FOREIGN KEY (Booking_ID)
-  REFERENCES [Booking](Booking_ID)
-  ON DELETE CASCADE
+  Payment_ID					int				PRIMARY KEY IDENTITY(1001,1),
+  Amount_Due					smallmoney		NOT NULL,
+  Booking_ID					int				NOT NULL FOREIGN KEY REFERENCES [Booking](Booking_ID)
 );
 GO
 
 -- SHARED_WORKSPACE. Uses Account_Number as FK. Checks if the Account_Number is Active.
 CREATE TABLE Shared_Workspace (
-  Account_Number int NOT NULL,
-  Payment_ID int NOT NULL,
-  CONSTRAINT [sw.check_if_account_is_active] CHECK (dbo.CheckIfAccountIsActive(Account_Number) = 1),
+  Account_Number				int				NOT NULL FOREIGN KEY REFERENCES Account(Account_Number),
+  Payment_ID					int				NOT NULL FOREIGN KEY REFERENCES Payment(Payment_ID),
   PRIMARY KEY (Account_Number, Payment_ID),
-  CONSTRAINT [FK_Shared_Workspace.Account_Number]
-  FOREIGN KEY (Account_Number)
-  REFERENCES Account(Account_Number),
-  CONSTRAINT [FK_Shared_Workspace.Payment_ID]
-  FOREIGN KEY (Payment_ID)
-  REFERENCES Payment(Payment_ID)
-  ON DELETE CASCADE
+
+  --constraint to check if the account that is being added to a shared workspace is active in the system
+  CONSTRAINT [sw.check_if_account_is_active] CHECK (dbo.CheckIfAccountIsActive(Account_Number) = 1),
 );
 GO
 

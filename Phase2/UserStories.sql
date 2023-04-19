@@ -101,151 +101,53 @@ GO
 workspaces from the database*/
 
 -- Delete record from Property table PRESERVING DATA FROM [Listing, Booking, Payment, Transactions and Shared Workspaces]
--- Since we are using foreign key constraints in chain, we can only delete if we use ON DELETE CASCADE.
--- This means that if we delete a property with the DELETE query, we will delete: All Workspaces from that property,
--- all listings from all of those workspaces, all bookings from all of those listings, all payments from all of those bookings,
--- all transactions from all of those payments and all shared workspaces from all of those payments.
 
---INSTEAD OF:
-/*
-DELETE FROM Property
-WHERE Property_ID = 12
-GO
-*/
-
---Do this:
-DECLARE @Account_that_is_performing_the_action int = 7
-DECLARE @PROPERTY_TO_DELETE int = 12 -- Set the property_id to delete here
-DECLARE @NEW_PROPERTY_ID int = 9000000+@PROPERTY_TO_DELETE
-DECLARE @woskpace_count INT = (SELECT COUNT(WORKSPACE_ID) FROM Workspace WHERE Property_ID = @PROPERTY_TO_DELETE)
-
-if dbo.CheckIfOwnsProperty(@Account_that_is_performing_the_action, @PROPERTY_TO_DELETE) = 1
+DECLARE @Account_Performing_Action INT = 1
+DECLARE @Property_To_Delete INT = 2
+if dbo.CheckIfOwnsWorkspaceProperty(@Account_Performing_Action, @Property_To_Delete) = 1
 BEGIN
-	IF EXISTS (SELECT * from Property where Property_ID = @PROPERTY_TO_DELETE)
+	IF NOT EXISTS (SELECT Property_ID
+	FROM Bookings_Active
+	WHERE Property_ID = @Property_To_Delete)
 	BEGIN
-		--Check the active bookings view to see if there's an active booking in that property 
-		IF NOT EXISTS (
-			SELECT * from Bookings_ACTIVE
-			WHERE [Bookings_ACTIVE].Property_ID = @PROPERTY_TO_DELETE)
-		BEGIN
-			SET IDENTITY_INSERT [Property] ON
+		WITH
+		TempTable as
+		(SELECT l.Listing_ID, w.Property_ID, l.Workspace_ID
+		from Listing l Join Workspace w On l.workspace_id = w.workspace_id
+		WHERE w.Property_ID = @Property_To_Delete)
 
-			INSERT Property(Property_ID, Address, Neighborhood, Square_Feet, Is_Reachable_By_Public_Transp, Has_Parking_Garage)
-			VALUES (@NEW_PROPERTY_ID, 'Deleted', 'Deleted',  null, 0, 0)
-
-			SET IDENTITY_INSERT [Property] OFF
-
-			UPDATE Property_Owner
-			SET Property_ID = @NEW_PROPERTY_ID
-			WHERE Property_ID = @PROPERTY_TO_DELETE
-
-			UPDATE Workspace
-			SET Property_ID = @NEW_PROPERTY_ID
-			WHERE Property_ID = @PROPERTY_TO_DELETE
-
-			SET IDENTITY_INSERT [Workspace] ON
-
-			-- A While loop to iterate through all workspaces that belonged to our soon-to-be-deleted property
-			DECLARE @count int = 1
-			WHILE (@count <= @woskpace_count)
-			BEGIN	
-				INSERT Workspace(Workspace_ID, Property_ID, Seats, Is_Smoking_Allowed, Type)
-				VALUES (CAST(CAST(@NEW_PROPERTY_ID as varchar(10)) + CAST(@count as varchar(10)) as int), @NEW_PROPERTY_ID, 0, 0, 'Desk');
-
-				-- Supporting table that allows us to iterate through the results of the query based on row number and our variable @count
-				WITH OrderedWoskpaceID AS
-				(
-				SELECT Workspace_ID, ROW_NUMBER() OVER(order by Workspace_ID) AS RowNumber
-				FROM Workspace
-				WHERE Property_ID = @NEW_PROPERTY_ID AND Workspace_ID < 9000000
-				)
-
-				-- Update Listing to replace the Workspace_ID of the to-be-deleted workspace with our internal code for deleted
-				UPDATE Listing
-				SET Workspace_ID = CAST(CAST(@NEW_PROPERTY_ID as varchar(10)) + CAST(@count as varchar(10)) as int)
-				WHERE Workspace_ID = (	
-					SELECT Workspace_ID
-					FROM OrderedWoskpaceID
-					WHERE RowNumber = @count);
-	
-				-- One more time calling our supporting table OrderedWoskpaceID:
-				WITH OrderedWoskpaceID AS
-				(
-				SELECT Workspace_ID, ROW_NUMBER() OVER(order by Workspace_ID) AS RowNumber
-				FROM Workspace
-				WHERE Property_ID = @NEW_PROPERTY_ID AND Workspace_ID < 9000000
-				)
-			
-				-- Delete the original Workspace (Always row number = 1 because our table loses one entry every iteraction)
-				DELETE FROM Workspace
-				WHERE Workspace_ID = (	SELECT Workspace_ID
-				FROM OrderedWoskpaceID
-				WHERE RowNumber = 1)
-
-				SET @count = @count + 1
-			END
-
-			SET IDENTITY_INSERT [Workspace] OFF
-
-				-- Delete all Listings that belong to a Deleted Workspace and have no existing Booking
-			DELETE FROM Listing
-			WHERE Workspace_ID > 9000000 and Listing_ID NOT IN (Select Listing_ID from Booking)
-
-			-- Finally, delete our original property from the database
-			DELETE FROM Property
-			Where Property_ID = @PROPERTY_TO_DELETE
-		END
+		UPDATE TempTable
+		SET Workspace_ID = NULL
+		WHERE Property_ID = @Property_To_Delete
 	END
+	DELETE FROM Property
+	WHERE Property_ID = @Property_To_Delete
 END
-else Select [ERROR] = ('Account ' + CAST(@Account_that_is_performing_the_action as varchar(2)) + ' does not own property ' + CAST(@PROPERTY_TO_DELETE as varchar(9)) + '!')
+ELSE Select [ERROR] = ('Account ' + CAST(@Account_Performing_Action as varchar(2)) + ' does not own property ' + CAST(@Property_To_Delete as varchar(9)) + '!')
 GO
 
--- DELETE A WORKSPACE, PRESERVING DATA
+-- DELETE A WORKSPACE, PRESERVING DATA FROM OLD [Listing, Booking] and deleting all current Listing from that workspace.
 
---INSTEAD OF:
-/*
-DELETE FROM Workspace
-WHERE Workspace_ID = 2
-GO
-*/
-
---Do this:
-DECLARE @Account_that_is_performing_the_action int = 2 -- REPLACE WITH '1' TO MAKE THIS WORK!
-DECLARE @Workspace_TO_DELETE int = 2 -- Set the workspace id to delete here
-DECLARE @NEW_WORKSPACE_ID int = 800000+@Workspace_TO_DELETE
-
-if dbo.CheckIfOwnsWorkspaceProperty(@Account_that_is_performing_the_action, @Workspace_TO_DELETE) = 1
+DECLARE @Account_Performing_Action INT = 2
+DECLARE @Workspace_To_Delete INT = 10
+if dbo.CheckIfOwnsWorkspaceProperty(@Account_Performing_Action, @Workspace_To_Delete) = 1
 BEGIN
-	IF EXISTS (SELECT * from Workspace where Workspace_ID = @Workspace_TO_DELETE)
+	IF NOT EXISTS (SELECT Workspace_ID
+	FROM Bookings_Active
+	WHERE Workspace_ID = @Workspace_To_Delete)
 	BEGIN
-	--Check the active bookings view to see if there's an active booking in that workspace 
-		IF NOT EXISTS (
-			SELECT * from Bookings_ACTIVE
-			WHERE [Bookings_ACTIVE].Workspace_ID = @Workspace_TO_DELETE)
-		BEGIN
-			SET IDENTITY_INSERT [Workspace] ON
-
-			INSERT Workspace(Workspace_ID, Property_ID, Seats, Is_Smoking_Allowed, Type)
-			VALUES (@NEW_WORKSPACE_ID, (select Property_id from Workspace Where Workspace_ID = @Workspace_TO_DELETE), 0, 0, 'Desk');
-
-			-- Update Listing to replace the Workspace_ID of the to-be-deleted workspace with our internal code for deleted
-			UPDATE Listing
-			SET Workspace_ID = @NEW_WORKSPACE_ID
-			WHERE Workspace_ID = @Workspace_TO_DELETE;
-			
-			-- Delete the original Workspace
-			DELETE FROM Workspace
-			WHERE Workspace_ID = @Workspace_TO_DELETE
-
-			SET IDENTITY_INSERT [Workspace] OFF
-
-			-- Delete all Listings that belong to a Deleted Workspace and have no existing Booking
-			DELETE FROM Listing
-			WHERE Workspace_ID BETWEEN 800000 and 9000000 and Listing_ID NOT IN (Select Listing_ID from Booking)
-		END
+		UPDATE Listing
+		SET Workspace_ID = NULL
+		WHERE Workspace_ID = @Workspace_To_Delete
 	END
+	DELETE FROM Workspace
+	WHERE Workspace_ID = @Workspace_To_Delete;
+
+	DELETE FROM LISTING
+	WHERE Workspace_ID IS NULL AND
+	listing_ID not in (SELECT l.Listing_ID from Listing l join Booking b ON l.Listing_ID = b.Booking_ID)
 END
-else Select [ERROR] = ('Account ' + CAST(@Account_that_is_performing_the_action as varchar(2)) + ' does not own Workspace ' + CAST(@Workspace_TO_DELETE as varchar(10)) + '!')
+ELSE Select [ERROR] = ('Account ' + CAST(@Account_Performing_Action as varchar(2)) + ' does not own workspace ' + CAST(@Workspace_To_Delete as varchar(9)) + '!')
 GO
 
 --6.

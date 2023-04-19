@@ -537,6 +537,7 @@ GO
 CREATE VIEW Bookings_Active AS
 SELECT
 	b.Booking_ID,
+	l.Listing_ID,
 	a.Email,
 	p.Payment_ID,
 	w.Workspace_ID,
@@ -558,6 +559,7 @@ GO
 CREATE VIEW Bookings_Not_Active AS
 SELECT
 	b.Booking_ID,
+	l.Listing_ID,
 	a.Email,
 	p.Payment_ID,
 	w.Workspace_ID,
@@ -649,4 +651,29 @@ FROM
 	Workspace w 
 	JOIN Property p ON w.Property_ID = p.Property_ID
 	JOIN Listing l on l.Workspace_ID = w.Workspace_ID
+GO
+
+-- Create a View to display all available Listings
+IF OBJECT_ID('Listings_Available') IS NOT NULL
+DROP VIEW Listings_Available
+GO
+CREATE VIEW Listings_Available AS 
+SELECT
+	l.Listing_ID,
+	p.Address + ', ' + p.Neighborhood as 'Address',
+	w.Workspace_ID,
+	w.Seats,
+	w.Type,
+	CASE WHEN w.Is_Smoking_Allowed = 1 THEN 'YES' ELSE 'NO' END AS 'smoking',
+	l.Availability_Date as 'Available From',
+	l.Lease_Term as 'Term',
+	l.Price,
+	CASE WHEN p.Has_Parking_Garage = 1 THEN 'YES' ELSE 'NO' END AS 'Garage',
+	CASE WHEN p.Is_Reachable_By_Public_Transp = 1 THEN 'YES' ELSE 'NO' END AS 'Public Trans.'
+FROM 
+	Workspace w 
+	JOIN Property p ON w.Property_ID = p.Property_ID
+	JOIN Listing l on l.Workspace_ID = w.Workspace_ID
+WHERE
+	l.listing_ID NoT IN (SELECT b.Listing_ID from Booking b, listing l where l.Listing_ID = b.Booking_ID)
 GO
